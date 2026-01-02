@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TV5 — Launcher</title>
+  <style>
+    :root{ --line:#e5e7eb; --muted:#6b7280; }
+    body{ margin:0; font-family:Arial, Helvetica, sans-serif; background:#fff; color:#111; }
+    header{ padding:14px; border-bottom:1px solid var(--line); }
+    main{ padding:14px; max-width:900px; margin:0 auto; display:grid; gap:12px; }
+    .card{ border:1px solid var(--line); border-radius:12px; padding:12px; }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    label{ font-size:12px; color:var(--muted); display:block; margin-bottom:6px; }
+    input,select{
+      padding:10px 12px; border:1px solid var(--line); border-radius:10px;
+      font-size:14px; min-width:220px;
+    }
+    button{
+      padding:10px 14px; border:1px solid var(--line); border-radius:10px;
+      background:#111; color:#fff; cursor:pointer; font-size:14px;
+    }
+    button.secondary{ background:#fff; color:#111; }
+    .muted{ color:var(--muted); font-size:12px; }
+    a{ color:#111; }
+    code{ background:#f3f4f6; padding:2px 6px; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="font-weight:700;">TV5 — GitHub Pages</div>
+    <div class="muted">Открывает <code>tv5_today.html</code> с параметрами <code>?date=YYYY-MM-DD&amp;role=RoleKey</code></div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="row">
+        <div>
+          <label for="date">Дата</label>
+          <input id="date" type="date" />
+        </div>
+
+        <div>
+          <label for="role">Роль</label>
+          <select id="role">
+            <option value="TechDirector">TechDirector</option>
+            <option value="Director">Director</option>
+            <option value="Producer">Producer</option>
+            <option value="Marketing">Marketing</option>
+            <option value="AssistantDirector">AssistantDirector</option>
+            <option value="TroupeManager">TroupeManager</option>
+          </select>
+        </div>
+
+        <div style="margin-top:22px; display:flex; gap:10px; flex-wrap:wrap;">
+          <button id="openBtn">Открыть Today</button>
+          <button id="copyBtn" class="secondary">Скопировать ссылку</button>
+        </div>
+      </div>
+
+      <div class="muted" style="margin-top:10px;">
+        Ссылка: <a id="link" href="#" target="_blank" rel="noopener">—</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <div style="font-weight:700; margin-bottom:6px;">Важно</div>
+      <div class="muted">
+        1) В репозитории должен быть файл <code>tv5_today.html</code> (ровно так, без <code>.html.html</code>).<br/>
+        2) GitHub Pages должен публиковать из ветки/папки, где лежит этот <code>index.html</code>.<br/>
+        3) Открывать можно так: <code>/tv5_today.html?date=2025-12-31&amp;role=TechDirector</code>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $date = document.getElementById("date");
+    const $role = document.getElementById("role");
+    const $link = document.getElementById("link");
+    const $open = document.getElementById("openBtn");
+    const $copy = document.getElementById("copyBtn");
+
+    function todayISO(){
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth()+1).padStart(2,"0");
+      const dd = String(d.getDate()).padStart(2,"0");
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function buildUrl(){
+      const date = $date.value || todayISO();
+      const role = $role.value || "TechDirector";
+      const u = new URL("./tv5_today.html", location.href);
+      u.searchParams.set("date", date);
+      u.searchParams.set("role", role);
+      return u.toString();
+    }
+
+    function refresh(){
+      const url = buildUrl();
+      $link.textContent = url;
+      $link.href = url;
+    }
+
+    $date.value = todayISO();
+    refresh();
+
+    $date.addEventListener("change", refresh);
+    $role.addEventListener("change", refresh);
+
+    $open.addEventListener("click", () => {
+      location.href = buildUrl();
+    });
+
+    $copy.addEventListener("click", async () => {
+      const url = buildUrl();
+      try {
+        await navigator.clipboard.writeText(url);
+        $copy.textContent = "Скопировано";
+        setTimeout(()=> $copy.textContent = "Скопировать ссылку", 900);
+      } catch (e) {
+        prompt("Скопируй вручную:", url);
+      }
+    });
+  </script>
+</body>
+</html>
