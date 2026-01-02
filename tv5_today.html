@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TV5 — Today (V1 viewer)</title>
+  <style>
+    :root{ --pad:12px; --line:#e5e7eb; --muted:#6b7280; }
+    body{ margin:0; font-family:Arial, Helvetica, sans-serif; background:#fff; color:#111; }
+    header{ padding:12px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap;}
+    header .pill{ border:1px solid var(--line); padding:6px 10px; border-radius:999px; font-size:12px; }
+    main{ padding:12px; display:grid; gap:12px; }
+
+    .card{ border:1px solid var(--line); border-radius:12px; padding:12px; }
+    .card h3{ margin:0 0 8px 0; font-size:14px; }
+    .muted{ color:var(--muted); font-size:12px; }
+
+    /* events */
+    .event{ border-top:1px dashed var(--line); padding-top:10px; margin-top:10px; }
+    .event:first-child{ border-top:none; padding-top:0; margin-top:0; }
+    .event .title{ font-weight:700; }
+    .kv{ display:flex; gap:10px; flex-wrap:wrap; margin-top:6px; }
+    .kv span{ font-size:12px; color:#111; }
+    .kv b{ color:var(--muted); font-weight:600; }
+
+    /* timeline */
+    .timeline-wrap{ border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+    .timeline-head{ display:grid; grid-template-columns:260px 1fr; border-bottom:1px solid var(--line); background:#fafafa; }
+    .timeline-head .left{ padding:10px; font-size:12px; color:var(--muted); }
+    .timeline-head .right{ position:relative; overflow:auto; }
+    .time-scale{ position:relative; height:42px; min-width:600px; }
+    .tick{ position:absolute; top:0; bottom:0; width:1px; background:#ddd; }
+    .label{ position:absolute; top:6px; transform:translateX(-50%); font-size:11px; color:var(--muted); white-space:nowrap; }
+
+    .timeline-body{ display:grid; grid-template-columns:260px 1fr; }
+    .left-col{ border-right:1px solid var(--line); }
+    .row-left{ padding:10px; border-bottom:1px solid var(--line); }
+    .row-left .name{ font-weight:700; font-size:13px; }
+    .row-left .dept{ font-size:12px; color:var(--muted); margin-top:2px; }
+
+    .right-col{ overflow:auto; }
+    .row-right{ position:relative; border-bottom:1px solid var(--line); height:54px; min-width:600px; }
+    .bar{
+      position:absolute; top:10px; height:34px; border-radius:10px;
+      border:1px solid #cbd5e1; background:#f1f5f9;
+      padding:6px 8px; box-sizing:border-box; overflow:hidden;
+      font-size:12px;
+    }
+    .bar .small{ font-size:11px; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="pill" id="hdrDate"></div>
+    <div class="pill" id="hdrRole"></div>
+    <div class="pill" id="hdrStatus"></div>
+    <div class="muted" id="hdrPerms"></div>
+  </header>
+
+  <main>
+    <section class="card" id="eventsCard">
+      <h3>Events today</h3>
+      <div id="eventsList" class="muted">Loading…</div>
+    </section>
+
+    <section class="card" id="notesCard">
+      <h3>Day notes</h3>
+      <div id="notesList" class="muted">Loading…</div>
+    </section>
+
+    <section class="card" id="timelineCard">
+      <h3>Participation timeline</h3>
+      <div class="timeline-wrap" id="timelineWrap"></div>
+    </section>
+  </main>
+
+<script>
+/** PUT YOUR WEB APP EXEC URL HERE */
+const API_BASE = "https://script.google.com/macros/s/AKfycbzMpo-Qp821YcCdAgVUPbsoHFuq3IU0BfLmkNdJYC-KC8OGDE0v0_NfFAZ7zJdoYg3bLg/exec"; // e.g. https://script.google.com/macros/s/.../exec
+
+function qs(name, fallback=null){
+  const u = new URL(location.href);
+  return u.searchParams.get(name) ?? fallback;
+}
+
+function hhmm(min){
+  const h = String(Math.floor(min/60)).padStart(2,"0");
+  const m = String(min%60).padStart(2,"0");
+  return `${h}:${m}`;
+}
+
+function el(tag, attrs={}, children=[]){
+  const n = document.createElement(tag);
+  Object.entries(attrs).forEach(([k,v])=>{
+    if (k === "class") n.className = v;
+    else if (k === "html") n.innerHTML = v;
+    else n.setAttribute(k, v);
+  });
+  children.forEach(c => n.appendChild(typeof c === "string" ? document.createTextNode(c) : c));
+  return n;
+}
+
+function loadJsonp(url){
+  return new Promise((resolve, reject) => {
+    const cbName = "__tv5_cb_" + Math.random().toString(36).slice(2);
+    const u = new URL(url);
+    u.searchParams.set("callback", cbName);
+
+    const script = document.createElement("script");
+    script.src = u.toString();
+    script.async = true;
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("JSONP timeout (no response)"));
+    }, 15000);
+
+    function cleanup(){
+      clearTimeout(timeout);
+      script.remove();
+      try { delete window[cbName]; } catch(e) { window[cbName] = undefined; }
+    }
+
+    window[cbName] = (data) => {
+      cleanup();
+      resolve(data);
+    };
+
+    script.onerror = () => {
+      cleanup();
+      reject(new Error("JSONP load error (script failed)"));
+    };
+
+    document.head.appendChild(script);
+  });
+}
+
+async function load(){
+  const date = qs("date", new Date().toISOString().slice(0,10));
+  const role = qs("role", "TechDirector");
+
+  const url = new URL(API_BASE);
+  url.searchParams.set("path","today");
+  url.searchParams.set("date", date);
+  url.searchParams.set("role", role);
+
+  const data = await loadJsonp(url.toString());
+
+  // header
+  document.getElementById("hdrDate").textContent = `Date: ${data.day_date}`;
+  document.getElementById("hdrRole").textContent = `Role: ${data.role_key}`;
+  document.getElementById("hdrStatus").textContent = `Health: ${data.day_status?.day_health_status || "?"}`;
+  document.getElementById("hdrPerms").textContent =
+    `perms: unpublished=${!!data.permissions?.can_view_unpublished}, internal_notes=${!!data.permissions?.can_view_internal_notes}`;
+
+  const blocks = new Map((data.blocks||[]).map(b => [b.block_key, b.payload]));
+
+  renderEvents(blocks.get("events_today"));
+  renderNotes(blocks.get("day_notes"));
+  renderTimeline(blocks.get("participation_today"));
+}
+
+function renderEvents(payload){
+  const box = document.getElementById("eventsList");
+  const events = payload?.events || [];
+  if (!events.length){ box.textContent = "No events"; return; }
+
+  box.innerHTML = "";
+  events.forEach(ev=>{
+    const node = el("div",{class:"event"},[
+      el("div",{class:"title"},[ev.event_title || ev.event_id || ""]),
+      el("div",{class:"kv"},[
+        el("span",{},[el("b",{},["Time: "]), ev.time_range || ""]),
+        el("span",{},[el("b",{},["Location: "]), ev.location || ""]),
+        el("span",{},[el("b",{},["Status: "]), ev.status || ""]),
+      ]),
+      ev.notes_public ? el("div",{class:"muted", style:"margin-top:6px;"},[`Public: ${ev.notes_public}`]) : el("span",{}),
+      ev.notes_internal ? el("div",{class:"muted"},[`Internal: ${ev.notes_internal}`]) : el("span",{}),
+    ]);
+    box.appendChild(node);
+  });
+}
+
+function renderNotes(payload){
+  const box = document.getElementById("notesList");
+  const notes = payload?.notes || [];
+  if (!notes.length){ box.textContent = "No notes"; return; }
+
+  box.innerHTML = "";
+  notes.forEach(n=>{
+    box.appendChild(el("div",{class:"event"},[
+      el("div",{class:"title"},[`${n.note_level || "note"}`]),
+      el("div",{class:"muted"},[n.note_text || ""]),
+      el("div",{class:"muted"},[`source: ${n.source_role || ""}`]),
+    ]));
+  });
+}
+
+function renderTimeline(payload){
+  const wrap = document.getElementById("timelineWrap");
+  const tl = payload?.timeline;
+  if (!tl){ wrap.innerHTML = `<div class="muted" style="padding:10px;">No timeline block</div>`; return; }
+
+  const start = tl.time_window?.start_min ?? 8*60;
+  const end   = tl.time_window?.end_min ?? 24*60;
+  const span  = Math.max(1, end - start);
+
+  const pxPerMin = 2;              // 60 min = 120px
+  const minWidth = Math.max(600, span * pxPerMin);
+
+  const head = el("div",{class:"timeline-head"},[
+    el("div",{class:"left"},["People"]),
+    el("div",{class:"right"},[
+      el("div",{class:"time-scale", style:`min-width:${minWidth}px;`}, buildTicks(start,end,pxPerMin))
+    ])
+  ]);
+
+  const leftCol = el("div",{class:"left-col"},[]);
+  const rightCol = el("div",{class:"right-col"},[]);
+
+  const byPerson = new Map();
+  (tl.assignments||[]).forEach(a=>{
+    const pid = String(a.person_id || "");
+    if (!byPerson.has(pid)) byPerson.set(pid, []);
+    byPerson.get(pid).push(a);
+  });
+
+  (tl.people_rows||[]).forEach(r=>{
+    leftCol.appendChild(el("div",{class:"row-left"},[
+      el("div",{class:"name"},[r.person_name || r.person_id || ""]),
+      el("div",{class:"dept"},[r.department || ""])
+    ]));
+
+    const row = el("div",{class:"row-right", style:`min-width:${minWidth}px;`},[]);
+    const items = byPerson.get(String(r.person_id)) || [];
+    items.forEach(a=>{
+      const s = (a.start_min ?? null);
+      const e = (a.end_min ?? null);
+      if (s == null || e == null) return;
+
+      const left = (s - start) * pxPerMin;
+      const width = Math.max(6, (e - s) * pxPerMin);
+
+      row.appendChild(el("div",{class:"bar", style:`left:${left}px;width:${width}px;`},[
+        el("div",{class:"title"},[a.event_title || a.event_id || ""]),
+        el("div",{class:"small"},[
+          `${a.call_time || ""} → ${a.event_time || ""} · ${a.role_in_event || ""}`
+        ])
+      ]));
+    });
+    rightCol.appendChild(row);
+  });
+
+  const body = el("div",{class:"timeline-body"},[leftCol, rightCol]);
+  wrap.innerHTML = "";
+  wrap.appendChild(head);
+  wrap.appendChild(body);
+}
+
+function buildTicks(start,end,pxPerMin){
+  const nodes = [];
+  for (let m = Math.ceil(start/60)*60; m <= end; m += 60) {
+    const x = (m - start) * pxPerMin;
+    nodes.push(el("div",{class:"tick", style:`left:${x}px;`}));
+    nodes.push(el("div",{class:"label", style:`left:${x}px;`},[hhmm(m)]));
+  }
+  return nodes;
+}
+
+load().catch(err=>{
+  document.getElementById("eventsList").textContent = String(err);
+  console.error(err);
+});
+</script>
+</body>
+</html>
